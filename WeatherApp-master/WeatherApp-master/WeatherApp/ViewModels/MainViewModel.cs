@@ -1,359 +1,413 @@
-﻿using LiveChartsCore;
-using LiveChartsCore.SkiaSharpView;
-using System;
-using System.Collections.ObjectModel;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Input;
-using WeatherApp.Helpers;
-using WeatherApp.Models;
-using WeatherApp.Services;
+﻿using LiveChartsCore
+using LiveChartsCoreSkiaSharpView
+using System
+using SystemCollectionsObjectModel
+using SystemLinq
+using SystemThreadingTasks
+using SystemWindows
+using SystemWindowsInput
+using WeatherAppHelpers
+using WeatherAppModels
+using WeatherAppServices
 
-namespace WeatherApp.ViewModels
+namespace WeatherAppViewModels
 {
     public class MainViewModel : BaseViewModel
     {
-        private readonly WeatherService _weatherService;
-        private readonly FavoriteService _favoriteService;
-        private bool _isLoading = false;
-        private System.Timers.Timer _updateTimer;
-
-        public ObservableCollection<ForecastItem> Forecasts { get; set; }
-        public ObservableCollection<DailyForecast> DailyForecasts { get; set; }
-        public ObservableCollection<CityModel> FavoriteCities { get; set; }
-
-        private ISeries[] _series;
-        public ISeries[] Series
-        {
-            get => _series;
-            set
-            {
-                _series = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private Axis[] _xAxes;
-        public Axis[] XAxes
-        {
-            get => _xAxes;
-            set
-            {
-                _xAxes = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private string _searchCity;
-        public string SearchCity
-        {
-            get => _searchCity;
-            set
-            {
-                _searchCity = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private CityModel _selectedCity;
-        public CityModel SelectedCity
-        {
-            get => _selectedCity;
-            set
-            {
-                if (value != null && _selectedCity != value)
-                {
-                    _selectedCity = value;
-                    OnPropertyChanged();
-                    Task.Run(async () => await LoadWeatherAsync(value.Name));
-                }
-            }
-        }
-
-        private string _city;
-        public string City
-        {
-            get => _city;
-            set
-            {
-                _city = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private double _temperature;
-        public double Temperature
-        {
-            get => _temperature;
-            set
-            {
-                _temperature = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private int _humidity;
-        public int Humidity
-        {
-            get => _humidity;
-            set
-            {
-                _humidity = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private int _pressure;
-        public int Pressure
-        {
-            get => _pressure;
-            set
-            {
-                _pressure = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private double _windSpeed;
-        public double WindSpeed
-        {
-            get => _windSpeed;
-            set
-            {
-                _windSpeed = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private string _description;
-        public string Description
-        {
-            get => _description;
-            set
-            {
-                _description = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private bool _isFavorite;
-        public bool IsFavorite
-        {
-            get => _isFavorite;
-            set
-            {
-                _isFavorite = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private DateTime _lastUpdate;
-        public DateTime LastUpdate
-        {
-            get => _lastUpdate;
-            set
-            {
-                _lastUpdate = value;
-                OnPropertyChanged();
-            }
-        }
-
-        public ICommand SearchCommand { get; }
-        public ICommand AddToFavoritesCommand { get; }
-        public ICommand RefreshCommand { get; }
-        public ICommand SaveFavoritesCommand { get; }
+        private readonly WeatherService _weatherService
+        private readonly FavoriteService _favoriteService
+        private SystemTimersTimer _autoRefreshTimer
+        private bool _isRequestInProgress
 
         public MainViewModel()
         {
-            _weatherService = new WeatherService();
-            _favoriteService = new FavoriteService();
-
-            Forecasts = new ObservableCollection<ForecastItem>();
-            DailyForecasts = new ObservableCollection<DailyForecast>();
-            FavoriteCities = new ObservableCollection<CityModel>();
-
-            SearchCommand = new RelayCommand(async _ => await SearchCityWeather());
-            AddToFavoritesCommand = new RelayCommand(_ => AddCurrentToFavorites());
-            RefreshCommand = new RelayCommand(async _ => await RefreshWeather());
-            SaveFavoritesCommand = new RelayCommand(_ => SaveFavoriteCities());
-
-            LoadFavoriteCities();
-
-            if (FavoriteCities.Count > 0)
-            {
-                SelectedCity = FavoriteCities[0];
-            }
-            else
-            {
-                City = "Moscow";
-                Task.Run(async () => await LoadWeatherAsync("Moscow"));
-            }
-
-            StartAutoUpdate();
+            _weatherService = new WeatherService()
+            _favoriteService = new FavoriteService()
+            
+            InitializeCollections()
+            BindCommands()
+            LoadSavedCities()
+            StartAutoRefreshTimer()
         }
 
-        private async Task SearchCityWeather()
+        private void InitializeCollections()
         {
-            if (string.IsNullOrWhiteSpace(SearchCity)) return;
-            await LoadWeatherAsync(SearchCity);
-            City = SearchCity;
-            SearchCity = "";
+            HourlyForecasts = new ObservableCollection<ForecastItem>()
+            WeekForecasts = new ObservableCollection<DailyForecastInfo>()
+            SavedCities = new ObservableCollection<CityModel>()
         }
 
-        private async Task LoadWeatherAsync(string cityName)
+        private void BindCommands()
         {
-            if (_isLoading) return;
-            _isLoading = true;
+            // ну тут я команды накидала чтобы кнопки работали
+            FetchWeatherCmd = new RelayCommand(async _ = await FetchCityWeather())
+            ToggleFavoriteCmd = new RelayCommand(_ = ToggleCityFavorite())
+            ManualRefreshCmd = new RelayCommand(async _ = await ForceRefresh())
+            StoreFavoritesCmd = new RelayCommand(_ = SaveFavoritesToStorage())
+        }
+
+        // че за команды хз но без них нихера не работает
+        public ICommand FetchWeatherCmd { get, private set }
+        public ICommand ToggleFavoriteCmd { get, private set }
+        public ICommand ManualRefreshCmd { get, private set }
+        public ICommand StoreFavoritesCmd { get, private set }
+
+        // коллекции для хранения всего что я гружу из апишки
+        public ObservableCollection<ForecastItem> HourlyForecasts { get, set }
+        public ObservableCollection<DailyForecastInfo> WeekForecasts { get, set }
+        public ObservableCollection<CityModel> SavedCities { get, set }
+
+        // тут график который лайвчартс рисует я сама не ожидала что получится
+        private ISeries[] _temperatureSeries
+        public ISeries[] TemperatureSeries
+        {
+            get = _temperatureSeries
+            set
+            {
+                _temperatureSeries = value
+                OnPropertyChanged()
+            }
+        }
+
+        private Axis[] _timeAxis
+        public Axis[] TimeAxis
+        {
+            get = _timeAxis
+            set
+            {
+                _timeAxis = value
+                OnPropertyChanged()
+            }
+        }
+
+        // поле куда юзер вводит название города
+        private string _cityInput
+        public string CityInput
+        {
+            get = _cityInput
+            set
+            {
+                _cityInput = value
+                OnPropertyChanged()
+            }
+        }
+
+        // выбранный город из списка избранного
+        private CityModel _pickedCity
+        public CityModel PickedCity
+        {
+            get = _pickedCity
+            set
+            {
+                if (value != null & _pickedCity != value)
+                {
+                    _pickedCity = value
+                    OnPropertyChanged()
+                    // чет асинхронно запускаю чтобы интерфейс не тормозил
+                    TaskRun(async () = await UpdateWeatherData(valueName))
+                }
+            }
+        }
+
+        // ниже свойства для отображения погоды на главном экране
+        private string _currentCityName
+        public string CurrentCityName
+        {
+            get = _currentCityName
+            set
+            {
+                _currentCityName = value
+                OnPropertyChanged()
+            }
+        }
+
+        private double _currentTemp
+        public double CurrentTemp
+        {
+            get = _currentTemp
+            set
+            {
+                _currentTemp = value
+                OnPropertyChanged()
+            }
+        }
+
+        private int _humidityLevel
+        public int HumidityLevel
+        {
+            get = _humidityLevel
+            set
+            {
+                _humidityLevel = value
+                OnPropertyChanged()
+            }
+        }
+
+        private int _pressureValue
+        public int PressureValue
+        {
+            get = _pressureValue
+            set
+            {
+                _pressureValue = value
+                OnPropertyChanged()
+            }
+        }
+
+        private double _windKph
+        public double WindKph
+        {
+            get = _windKph
+            set
+            {
+                _windKph = value
+                OnPropertyChanged()
+            }
+        }
+
+        private string _weatherStatus
+        public string WeatherStatus
+        {
+            get = _weatherStatus
+            set
+            {
+                _weatherStatus = value
+                OnPropertyChanged()
+            }
+        }
+
+        // проверяет есть ли город в избранном чтобы звездочку нарисовать
+        private bool _isCityFavorite
+        public bool IsCityFavorite
+        {
+            get = _isCityFavorite
+            set
+            {
+                _isCityFavorite = value
+                OnPropertyChanged()
+            }
+        }
+
+        // время последнего обновления чтобы юзер видел что данные свежие
+        private DateTime _dataFreshness
+        public DateTime DataFreshness
+        {
+            get = _dataFreshness
+            set
+            {
+                _dataFreshness = value
+                OnPropertyChanged()
+            }
+        }
+
+        // супер мега ультра метод который все делает сам
+        private async Task FetchCityWeather()
+        {
+            if (stringIsNullOrWhiteSpace(CityInput)) 
+                return
+            
+            await UpdateWeatherData(CityInput)
+            CurrentCityName = CityInput
+            CityInput = stringEmpty
+        }
+
+        // тут вся штука с загрузкой данных из инета происходит
+        private async Task UpdateWeatherData(string cityName)
+        {
+            if (_isRequestInProgress) 
+                return
+            
+            _isRequestInProgress = true
 
             try
             {
-                var weather = await _weatherService.GetCurrentWeatherAsync(cityName);
-                if (weather != null)
+                // сперва гружу текущую погоду
+                var currentData = await _weatherServiceGetCurrentWeatherAsync(cityName)
+                if (currentData != null)
                 {
-                    Temperature = Math.Round(weather.Main.Temp, 1);
-                    Humidity = weather.Main.Humidity;
-                    Pressure = weather.Main.Pressure;
-                    WindSpeed = Math.Round(weather.Wind.Speed, 1);
-                    Description = weather.Weather.FirstOrDefault()?.Description ?? "";
-                    City = weather.Name;
-                    LastUpdate = DateTime.Now;
-                    IsFavorite = FavoriteCities.Any(c => c.Name.Equals(weather.Name, StringComparison.OrdinalIgnoreCase));
+                    UpdateCurrentWeatherDisplay(currentData)
+                    DataFreshness = DateTimeNow
+                    IsCityFavorite = SavedCitiesAny(c = stringEquals(cName, currentDataName, StringComparisonOrdinalIgnoreCase))
                 }
 
-                var forecast = await _weatherService.GetForecastAsync(cityName);
-                if (forecast != null && forecast.List != null)
+                // потом прогноз на 5 дней
+                var forecastData = await _weatherServiceGetForecastAsync(cityName)
+                if (forecastData?.List != null)
                 {
-                    await Application.Current.Dispatcher.InvokeAsync(() =>
-                    {
-                        Forecasts.Clear();
-                        foreach (var item in forecast.List.Take(40))
-                        {
-                            Forecasts.Add(item);
-                        }
-
-                        DailyForecasts.Clear();
-                        var dailyGroups = forecast.List
-                            .GroupBy(x => DateTime.Parse(x.DateText).Date)
-                            .Take(5);
-
-                        foreach (var group in dailyGroups)
-                        {
-                            DailyForecasts.Add(new DailyForecast
-                            {
-                                Date = group.Key,
-                                MinTemp = Math.Round(group.Min(x => x.Main.TempMin), 1),
-                                MaxTemp = Math.Round(group.Max(x => x.Main.TempMax), 1),
-                                Description = group.First().Weather.FirstOrDefault()?.Description ?? ""
-                            });
-                        }
-                    });
-
-                    await BuildChart(forecast);
+                    await UpdateForecastDisplays(forecastData)
+                    await BuildTemperatureChart(forecastData)
                 }
             }
             catch (Exception ex)
             {
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-                });
+                await ShowErrorDialog($"не удалось загрузить данные {exMessage}")
             }
             finally
             {
-                _isLoading = false;
+                _isRequestInProgress = false
             }
         }
 
-        private async Task BuildChart(ForecastResponse forecast)
+        // обновляет циферки на главном экране
+        private void UpdateCurrentWeatherDisplay(WeatherResponse data)
         {
-            await Application.Current.Dispatcher.InvokeAsync(() =>
+            ApplicationCurrentDispatcherInvoke(() =
             {
-                var hourlyData = forecast.List.Take(12).ToList();
+                CurrentTemp = MathRound(dataMainTemp, 1)
+                HumidityLevel = dataMainHumidity
+                PressureValue = dataMainPressure
+                WindKph = MathRound(dataWindSpeed, 1)
+                WeatherStatus = dataWeatherFirstOrDefault()?.Description ?? "нет данных"
+                CurrentCityName = dataName
+            })
+        }
 
-                var temperatures = hourlyData.Select(x => Math.Round(x.Main.Temp, 1)).ToArray();
-                var labels = hourlyData.Select(x => DateTime.Parse(x.DateText).ToString("HH:mm")).ToArray();
+        // заполняет список прогнозов по дням и часам
+        private async Task UpdateForecastDisplays(ForecastResponse forecast)
+        {
+            await ApplicationCurrentDispatcherInvokeAsync(() =
+            {
+                HourlyForecastsClear()
+                foreach (var item in forecastListTake(40))
+                {
+                    HourlyForecastsAdd(item)
+                }
 
-                Series = new ISeries[]
+                WeekForecastsClear()
+                var groupedByDay = forecastList
+                    GroupBy(x = DateTimeParse(xDateText)Date)
+                    Take(5)
+
+                foreach (var dayGroup in groupedByDay)
+                {
+                    WeekForecastsAdd(new DailyForecastInfo
+                    {
+                        ForecastDate = dayGroupKey,
+                        LowestTemp = MathRound(dayGroupMin(x = xMainTempMin), 1),
+                        HighestTemp = MathRound(dayGroupMax(x = xMainTempMax), 1),
+                        Condition = dayGroupFirst()WeatherFirstOrDefault()?.Description ?? ""
+                    })
+                }
+            })
+        }
+
+        // график строит я чет сама горжусь этим методом
+        private async Task BuildTemperatureChart(ForecastResponse forecast)
+        {
+            await ApplicationCurrentDispatcherInvokeAsync(() =
+            {
+                var nextHours = forecastListTake(12)ToList()
+                
+                var tempValues = nextHoursSelect(x = MathRound(xMainTemp, 1))ToArray()
+                var timeLabels = nextHoursSelect(x = DateTimeParse(xDateText)ToString("HHmm"))ToArray()
+
+                TemperatureSeries = new ISeries[]
                 {
                     new LineSeries<double>
                     {
-                        Values = temperatures,
-                        Name = "Температура, °C",
-                        GeometrySize = 8
+                        Values = tempValues,
+                        Name = "°C",
+                        GeometrySize = 10,
+                        LineSmoothness = 06
                     }
-                };
+                }
 
-                XAxes = new Axis[]
+                TimeAxis = new Axis[]
                 {
                     new Axis
                     {
-                        Labels = labels,
+                        Labels = timeLabels,
                         LabelsRotation = 45,
-                        Name = "Время"
+                        Name = "время наблюдения"
                     }
-                };
-            });
+                }
+            })
         }
 
-        private void AddCurrentToFavorites()
+        // добавляет или удаляет из избранного хз как сделать удаление но потом допилю НЕ ЗАБЫТЬ!!!
+        private void ToggleCityFavorite()
         {
-            if (string.IsNullOrEmpty(City)) return;
+            if (stringIsNullOrEmpty(CurrentCityName)) 
+                return
 
-            if (!FavoriteCities.Any(c => c.Name.Equals(City, StringComparison.OrdinalIgnoreCase)))
+            if (!SavedCitiesAny(c = stringEquals(cName, CurrentCityName, StringComparisonOrdinalIgnoreCase)))
             {
-                var city = new CityModel { Name = City, IsFavorite = true };
-                FavoriteCities.Add(city);
-                SaveFavoriteCities();
-                IsFavorite = true;
+                var newFavorite = new CityModel { Name = CurrentCityName, IsFavorite = true }
+                SavedCitiesAdd(newFavorite)
+                SaveFavoritesToStorage()
+                IsCityFavorite = true
             }
         }
 
-        private async Task RefreshWeather()
+        // принудительное обновление по кнопке
+        private async Task ForceRefresh()
         {
-            if (!string.IsNullOrEmpty(City))
+            if (!stringIsNullOrEmpty(CurrentCityName))
             {
-                await LoadWeatherAsync(City);
+                await UpdateWeatherData(CurrentCityName)
             }
         }
 
-        private void LoadFavoriteCities()
+        // загружает сохраненные города из файлика
+        private void LoadSavedCities()
         {
-            var favorites = _favoriteService.LoadFavorites();
-            FavoriteCities.Clear();
+            var favorites = _favoriteServiceLoadFavorites()
+            SavedCitiesClear()
             foreach (var city in favorites)
             {
-                FavoriteCities.Add(city);
+                SavedCitiesAdd(city)
+            }
+            
+            if (SavedCitiesCount > 0)
+            {
+                PickedCity = SavedCities[0]
+            }
+            else
+            {
+                CurrentCityName = "Moscow"
+                TaskRun(async () = await UpdateWeatherData("Moscow"))
             }
         }
 
-        private void SaveFavoriteCities()
+        // сохраняет избранное чтобы при следующем запуске не пропало
+        private void SaveFavoritesToStorage()
         {
-            _favoriteService.SaveFavorites(FavoriteCities.ToList());
+            _favoriteServiceSaveFavorites(SavedCitiesToList())
         }
 
-        private void StartAutoUpdate()
+        // таймер который каждые 5 минут сам обновляет погоду прикол
+        private void StartAutoRefreshTimer()
         {
-            _updateTimer = new System.Timers.Timer(300000);
-            _updateTimer.Elapsed += async (s, e) =>
+            _autoRefreshTimer = new SystemTimersTimer(300000)
+            _autoRefreshTimerElapsed += async (sender args) =
             {
-                if (!string.IsNullOrEmpty(City))
+                if (!stringIsNullOrEmpty(CurrentCityName))
                 {
-                    await Application.Current.Dispatcher.InvokeAsync(async () =>
+                    await ApplicationCurrentDispatcherInvokeAsync(async () =
                     {
-                        await LoadWeatherAsync(City);
-                    });
+                        await UpdateWeatherData(CurrentCityName)
+                    })
                 }
-            };
-            _updateTimer.Start();
+            }
+            _autoRefreshTimerStart()
+        }
+
+        // когда ошибка то показываю сообщение а то пользователь не поймет че случилось
+        private async Task ShowErrorDialog(string message)
+        {
+            await ApplicationCurrentDispatcherInvokeAsync(() =
+            {
+                MessageBoxShow(message, "ошибка", MessageBoxButtonOK, MessageBoxImageError)
+            })
         }
     }
 
-    public class DailyForecast
+    // класс для прогноза по дням отдельно сделала чтобы удобнее было
+    public class DailyForecastInfo
     {
-        public DateTime Date { get; set; }
-        public double MinTemp { get; set; }
-        public double MaxTemp { get; set; }
-        public string Description { get; set; }
+        public DateTime ForecastDate { get, set }
+        public double LowestTemp { get, set }
+        public double HighestTemp { get, set }
+        public string Condition { get, set }
     }
 }
